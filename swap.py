@@ -212,11 +212,12 @@ walletadr = ""  #这里填写钱包地址
 private_key = ""  #这里填写密钥
 
 
-tokencontract = "0x82a479264b36104be4fdb91618a59a4fc0f50650"  #代币合约地址 目前是birb
-howmuchbnb: float = 0.001
-slippages: float =10 * 0.01
-gasprice: float = 7
-gaslimit: int = 200000
+tokencontract = "0xa53e61578ff54f1ad70186be99332a6e20b6ffa9"  #代币合约地址
+howmuchbnb: float = 0.002
+tokens_sell: float = 73004
+slippages: float = 20 * 0.01
+gasprice: float = 5.1
+gaslimit: int = 700000
 
 
 def wbnb_balance():
@@ -229,7 +230,7 @@ def checksum(contract):
     return tokencontract_checksum
 
 
-erc20 = web3.eth.contract(address=checksum(wbnb), abi=erc20abi)
+erc20 = web3.eth.contract(address=checksum(tokencontract), abi=erc20abi)
 pancake = web3.eth.contract(address=checksum(pancakerouter), abi=pancakeabi)
 
 def getinfo():
@@ -256,15 +257,30 @@ def balance(wallet, token, humanread):
     else:
         return tokenblance_no_decimals
 
+#指定bnb能兑换多少个token
+def how_many_tokens_can_buy():
+    amount = float(pancake.functions.getAmountsOut(web3.toWei(howmuchbnb, 'ether'), [checksum(wbnb), checksum(tokencontract)]).call()[-1])/10**getinfo()[-1]
+    return amount
 
-def priceBuy():
-    pricein = float(pancake.functions.getAmountsOut(web3.toWei(howmuchbnb, 'ether'), [checksum(wbnb), checksum(tokencontract)]).call()[-1])/10**getinfo()[-1]
-    return pricein
+#卖一个目标token的价格 单位为bnb
+def sell_one_token_price():
+    price = web3.fromWei(int(pancake.functions.getAmountsOut(10**getinfo()[-1], [checksum(tokencontract), checksum(wbnb)]).call()[-1]), 'ether')
+    return price
+
+#买一个目标token的价格 单位为bnb
+def buy_one_token_price():
+    price = web3.fromWei(int(pancake.functions.getAmountsIn(10**getinfo()[-1], [checksum(wbnb), checksum(tokencontract)]).call()[0]), 'ether')
+    return price
+
+#指定token数量能兑换多少bnb
+def how_many_bnb_can_get():
+    price = web3.fromWei(int(pancake.functions.getAmountsOut(balance(walletadr, tokencontract, 0), [checksum(tokencontract), checksum(wbnb)]).call()[-1]), 'ether')
+    return price
 
 
 def buy():
     'build交易(最少获得的代币数量，[要花费的代币地址，要买的代币地址]，钱包地址，交易限制时间 当前是10min)'
-    tx_info = pancake.functions.swapExactETHForTokens(int(priceBuy()*(1-slippages)*(10**getinfo()[-1])), [checksum(wbnb), checksum(tokencontract)], walletadr, int(time.time()) + 10 * 60). \
+    tx_info = pancake.functions.swapExactETHForTokensSupportingFeeOnTransferTokens(int(how_many_tokens_can_buy()*(10**getinfo()[-1])*(1-slippages)), [checksum(wbnb), checksum(tokencontract)], walletadr, int(time.time()) + 10 * 60). \
         buildTransaction(
         {
             'from': walletadr,
@@ -274,14 +290,74 @@ def buy():
             'nonce': web3.eth.get_transaction_count(walletadr),
         }
     )
-    print('wbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), '开始交易!!', time.strftime("%Y-%m-%d %H:%M:%S"))
+    print('wbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
     sign_txn = web3.eth.account.sign_transaction(tx_info, private_key=private_key)
     print('交易发送中...', time.strftime("%Y-%m-%d %H:%M:%S"))
     res = web3.eth.sendRawTransaction(sign_txn.rawTransaction).hex()
     txn_receipt = web3.eth.waitForTransactionReceipt(res)
-    print('Txn = ', res, time.strftime("%Y-%m-%d %H:%M:%S"))
-    print('交易完成\nwbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
-    #print(txn_receipt)
+    print('Txn:', res, time.strftime("%Y-%m-%d %H:%M:%S"))
+    if txn_receipt['status'] == 1:
+        print('交易完成\nwbnb余额：', wbnb_balance(), str(getinfo()[1])+'余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
+    else:
+        print('交易失败，详情查看：', 'https://bscscan.com/tx/'+res)
+    return txn_receipt
+
+
+def check_approved():
+    print('授权检测...')
+    allowance = erc20.functions.allowance(checksum(walletadr), checksum(pancakerouter)).call()
+    print('授权数量：', allowance)
+    return allowance
+
+
+def approve():
+    if check_approved() < balance(walletadr, tokencontract, 0):
+        print('代币未授权，自动授权...')
+        approve_info = erc20.functions.approve(checksum(pancakerouter), int(f"0x{64 * 'f'}", 16)).buildTransaction(
+            {
+                'from': walletadr,
+                'value': web3.toWei(0, 'ether'),
+                'gas': gaslimit,
+                'gasPrice': web3.toWei(gasprice, 'Gwei'),
+                'nonce': web3.eth.get_transaction_count(walletadr),
+            }
+        )
+        sign_txn = web3.eth.account.sign_transaction(approve_info, private_key=private_key)
+        print('授权中...', time.strftime("%Y-%m-%d %H:%M:%S"))
+        res = web3.eth.sendRawTransaction(sign_txn.rawTransaction).hex()
+        txn_receipt = web3.eth.waitForTransactionReceipt(res)
+        print('Txn:', res, time.strftime("%Y-%m-%d %H:%M:%S"))
+        if txn_receipt['status'] == 1:
+            print('授权完成', time.strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            print('授权失败，详情查看：', 'https://bscscan.com/tx/'+res)
+    else:
+        pass
+
+
+def sell():
+    approve()
+    '(卖出数量, 最少收到的wbnb, [要花费的代币地址，要买的代币地址], 钱包地址，交易限制时间 当前是10min)'
+    tx_info = pancake.functions.swapExactTokensForETHSupportingFeeOnTransferTokens(int(tokens_sell*10**getinfo()[-1]), int(web3.toWei(how_many_bnb_can_get(), 'ether')*(1-slippages)), [checksum(tokencontract), checksum(wbnb)], walletadr, int(time.time()) + 10 * 60). \
+        buildTransaction(
+        {
+            'from': walletadr,
+            #'value': web3.toWei(howmuchbnb, 'ether'),
+            'gas': gaslimit,
+            'gasPrice': web3.toWei(gasprice, 'Gwei'),
+            'nonce': web3.eth.get_transaction_count(walletadr),
+        }
+    )
+    print('wbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
+    sign_txn = web3.eth.account.sign_transaction(tx_info, private_key=private_key)
+    print('交易发送中...', time.strftime("%Y-%m-%d %H:%M:%S"))
+    res = web3.eth.sendRawTransaction(sign_txn.rawTransaction).hex()
+    txn_receipt = web3.eth.waitForTransactionReceipt(res)
+    print('Txn:', res, time.strftime("%Y-%m-%d %H:%M:%S"))
+    if txn_receipt['status'] == 1:
+        print('交易完成\nwbnb余额：', wbnb_balance(), str(getinfo()[1])+'余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
+    else:
+        print('交易失败，详情查看：', 'https://bscscan.com/tx/'+res)
     return txn_receipt
 
 
@@ -294,4 +370,5 @@ def latency():
         print('Connected! Latency:', (t2-t1)/1000000, 'ms')
     else:
         print('Connect fail')
+
 
