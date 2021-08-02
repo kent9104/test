@@ -290,7 +290,7 @@ def buy():
             'nonce': web3.eth.get_transaction_count(walletadr),
         }
     )
-    print('wbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
+    print('wbnb余额：', wbnb_balance(), str(getinfo()[1])+'余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
     sign_txn = web3.eth.account.sign_transaction(tx_info, private_key=private_key)
     print('交易发送中...', time.strftime("%Y-%m-%d %H:%M:%S"))
     res = web3.eth.sendRawTransaction(sign_txn.rawTransaction).hex()
@@ -348,7 +348,7 @@ def sell():
             'nonce': web3.eth.get_transaction_count(walletadr),
         }
     )
-    print('wbnb余额：', wbnb_balance(), '目标代币余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
+    print('wbnb余额：', wbnb_balance(), str(getinfo()[1])+'余额：', balance(walletadr, tokencontract, 1), time.strftime("%Y-%m-%d %H:%M:%S"))
     sign_txn = web3.eth.account.sign_transaction(tx_info, private_key=private_key)
     print('交易发送中...', time.strftime("%Y-%m-%d %H:%M:%S"))
     res = web3.eth.sendRawTransaction(sign_txn.rawTransaction).hex()
